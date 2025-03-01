@@ -114,20 +114,23 @@ public class ReportPanel extends JPanel {
     
     private JPanel createTransactionSummaryChart() {
         DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-        
-        List<Transaction> incoming = transactionDAO.getAll("incoming");
-        List<Transaction> outgoing = transactionDAO.getAll("outgoing");
-        
-        double totalIncoming = incoming.stream()
-            .mapToDouble(t -> t.getQuantity() * t.getUnitPrice())
-            .sum();
+        try {
+            List<Transaction> incoming = transactionDAO.search(null, "IN", null, null);
+            List<Transaction> outgoing = transactionDAO.search(null, "OUT", null, null);
             
-        double totalOutgoing = outgoing.stream()
-            .mapToDouble(t -> t.getQuantity() * t.getUnitPrice())
-            .sum();
-            
-        dataset.addValue(totalIncoming, "القيمة", "الوارد");
-        dataset.addValue(totalOutgoing, "القيمة", "المنصرف");
+            double totalIncoming = incoming.stream()
+                .mapToDouble(t -> t.getQuantity() * t.getUnitPrice())
+                .sum();
+                
+            double totalOutgoing = outgoing.stream()
+                .mapToDouble(t -> t.getQuantity() * t.getUnitPrice())
+                .sum();
+                
+            dataset.addValue(totalIncoming, "القيمة", "الوارد");
+            dataset.addValue(totalOutgoing, "القيمة", "المنصرف");
+        } catch (SQLException e) {
+            System.err.println("خطأ في جلب بيانات المعاملات: " + e.getMessage());
+        }
         
         JFreeChart chart = ChartFactory.createBarChart(
             "ملخص المعاملات",

@@ -220,7 +220,7 @@ public class TransactionDialog extends JDialog {
                 newTransaction.setNotes(notesArea.getText());
                 newTransaction.setUserId(currentUser.getId());
                 
-                transactionDAO.create(newTransaction);
+                transactionDAO.add(newTransaction);
             } else {
                 transaction.setQuantity(quantity);
                 transaction.setUnitPrice(Double.parseDouble(unitPriceField.getText()));
@@ -228,7 +228,7 @@ public class TransactionDialog extends JDialog {
                 transaction.setTransactionDate(dateChooser.getDate());
                 transaction.setNotes(notesArea.getText());
                 
-                transactionDAO.update(transaction);
+                transactionDAO.add(transaction);
             }
             
             transactionSaved = true;

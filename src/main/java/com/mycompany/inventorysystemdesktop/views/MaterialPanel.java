@@ -107,7 +107,7 @@ public class MaterialPanel extends JPanel {
         if (keyword.isEmpty()) {
             materials = materialDAO.getAll();
         } else {
-            materials = materialDAO.search(keyword);
+            materials = materialDAO.search(keyword, null, null);
         }
         
         for (Material material : materials) {

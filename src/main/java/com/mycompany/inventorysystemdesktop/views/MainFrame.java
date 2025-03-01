@@ -44,10 +44,10 @@ public class MainFrame extends JFrame {
         tabbedPane.addTab("التصنيفات", new CategoryPanel(currentUser));
         
         // تبويب الوارد
-        tabbedPane.addTab("الوارد", new TransactionPanel(currentUser));
+        tabbedPane.addTab("الوارد", new TransactionsPanel(currentUser, "IN"));
         
         // تبويب المنصرف
-        tabbedPane.addTab("المنصرف", new TransactionPanel(currentUser));
+        tabbedPane.addTab("المنصرف", new TransactionsPanel(currentUser, "OUT"));
         
         // تبويب التقارير
         tabbedPane.addTab("التقارير", new ReportPanel());
@@ -109,34 +109,4 @@ public class MainFrame extends JFrame {
             new LoginDialog(null).setVisible(true);
         }
     }
-    
-    
-    
-    private void addTabs() {
-    // التبويب الرئيسي (لوحة المعلومات)
-    tabbedPane.addTab("لوحة المعلومات", new DashboardPanel(currentUser));
-    
-    // تبويب المواد
-    tabbedPane.addTab("المواد", new MaterialPanel(currentUser));
-    
-    // تبويب التصنيفات
-    tabbedPane.addTab("التصنيفات", new CategoryPanel(currentUser));
-    
-    // تبويب الوارد
-    tabbedPane.addTab("الوارد", new TransactionPanel(currentUser, "IN"));
-    
-    // تبويب المنصرف
-    tabbedPane.addTab("المنصرف", new TransactionPanel(currentUser, "OUT"));
-    
-    // تبويب التقارير
-    tabbedPane.addTab("التقارير", new ReportPanel());
-    
-    // إذا كان المستخدم مدير، أضف تبويب المستخدمين
-    if (currentUser.getRole().equals("ADMIN")) {
-        tabbedPane.addTab("المستخدمين", new UserPanel(currentUser));
-    }
-}
-    
-    
-    
 }

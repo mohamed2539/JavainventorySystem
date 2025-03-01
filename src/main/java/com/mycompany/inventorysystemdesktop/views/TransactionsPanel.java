@@ -8,7 +8,7 @@ import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.util.Date;
-import java.util.List;
+import java.util.List;      //TransactionsPanel
 import java.text.SimpleDateFormat;
 import com.toedter.calendar.JDateChooser;
 import java.util.Calendar;
@@ -124,18 +124,21 @@ public class TransactionsPanel extends JPanel {
         JButton deleteButton = new JButton("حذف");
         JButton printButton = new JButton("طباعة");
         JButton exportButton = new JButton("تصدير");
+        JButton btnIssue = new JButton("صرف مواد");
         
         addButton.addActionListener(this::addTransaction);
         editButton.addActionListener(this::editTransaction);
         deleteButton.addActionListener(this::deleteTransaction);
         printButton.addActionListener(this::printTransaction);
         exportButton.addActionListener(this::exportTransactions);
+        btnIssue.addActionListener(e -> showIssueDialog());
         
         buttonPanel.add(addButton);
         buttonPanel.add(editButton);
         buttonPanel.add(deleteButton);
         buttonPanel.add(printButton);
         buttonPanel.add(exportButton);
+        buttonPanel.add(btnIssue);
         
         return buttonPanel;
     }
@@ -219,9 +222,7 @@ public class TransactionsPanel extends JPanel {
             }
             
             TransactionDialog dialog = new TransactionDialog(SwingUtilities.getWindowAncestor(this),null,
-                currentUser,
-                transactionType
-            );
+                currentUser);
             
             dialog.setVisible(true);
             if (dialog.isTransactionSaved()) {
@@ -243,15 +244,15 @@ public class TransactionsPanel extends JPanel {
     
     
      private void showAddQuantityDialog() {
-        int selectedRow = transactionTable.getSelectedRow();
+        int selectedRow = transactionsTable.getSelectedRow();
         if (selectedRow == -1) {
             showWarning("الرجاء اختيار معاملة أولاً");
             return;
         }
         
         try {
-            String referenceNo = (String) transactionTable.getValueAt(selectedRow, 0);
-            Transaction transaction = transactionDAO.findByReferenceNo(referenceNo);
+            int transactionId = (int) transactionsTable.getValueAt(selectedRow, 0);
+            Transaction transaction = transactionDAO.findById(transactionId);
             
             if (transaction != null) {
                 String input = JOptionPane.showInputDialog(this,
@@ -273,10 +274,10 @@ public class TransactionsPanel extends JPanel {
                         newTransaction.setType(transaction.getType());
                         newTransaction.setQuantity(quantity);
                         newTransaction.setUnitPrice(transaction.getUnitPrice());
-                        newTransaction.setNotes("إضافة كمية للمعاملة " + referenceNo);
+                        newTransaction.setNotes("إضافة كمية للمعاملة " + transaction.getReferenceNo());
                         newTransaction.setUserId(currentUser.getId());
                         
-                        if (transactionDAO.create(newTransaction)) {
+                        if (transactionDAO.add(newTransaction)) {
                             showMessage("تم إضافة الكمية بنجاح");
                             loadTransactions();
                         }
@@ -289,16 +290,12 @@ public class TransactionsPanel extends JPanel {
             showError("خطأ في إضافة الكمية: " + ex.getMessage());
         }
     }
-}
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
+    private void showIssueDialog() {
+        IssueDialog dialog = new IssueDialog((JFrame)SwingUtilities.getWindowAncestor(this));
+        dialog.setVisible(true);
+        loadTransactions(); // تحديث الجدول بعد إغلاق النافذة
+    }
     
     private void editTransaction(ActionEvent e) {
         int selectedRow = transactionsTable.getSelectedRow();
@@ -313,7 +310,7 @@ public class TransactionsPanel extends JPanel {
             
             TransactionDialog dialog = new TransactionDialog(
                 SwingUtilities.getWindowAncestor(this),
-                transaction,
+                null,
                 currentUser
             );
             dialog.setVisible(true);
@@ -401,8 +398,21 @@ public class TransactionsPanel extends JPanel {
             JOptionPane.ERROR_MESSAGE);
     }
     
+    private void showMessage(String message) {
+        JOptionPane.showMessageDialog(this,
+            message,
+            "نجاح",
+            JOptionPane.INFORMATION_MESSAGE);
+    }
     
-     private void searchTransactions() {
+    private void showWarning(String message) {
+        JOptionPane.showMessageDialog(this,
+            message,
+            "تنبيه",
+            JOptionPane.WARNING_MESSAGE);
+    }
+    
+    private void searchTransactions() {
         tableModel.setRowCount(0);
         SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm");
         
@@ -423,7 +433,7 @@ public class TransactionsPanel extends JPanel {
                     transaction.getUnitPrice(),
                     transaction.getTotalPrice(),
                     transaction.getNotes(),
-                    dateFormat.format(transaction.getCreatedAt())
+                    dateFormat.format(transaction.getTransactionDate())
                 };
                 tableModel.addRow(row);
             }
@@ -431,6 +441,4 @@ public class TransactionsPanel extends JPanel {
             showError("خطأ في تحميل المعاملات: " + e.getMessage());
         }
     }
-    
-    
 }

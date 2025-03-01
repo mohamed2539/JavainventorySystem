@@ -104,19 +104,65 @@ public Material findById(int id) throws SQLException {
         }
     }
     
+    // التحقق من وجود معاملات مرتبطة
+    private boolean hasRelatedTransactions(int materialId, Connection conn) throws SQLException {
+        String sql = "SELECT COUNT(*) FROM transaction_details WHERE material_id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, materialId);
+            ResultSet rs = stmt.executeQuery();
+            if (rs.next()) {
+                return rs.getInt(1) > 0;
+            }
+        }
+        return false;
+    }
+
     // حذف مادة
     public boolean delete(int id) {
-        String sql = "DELETE FROM materials WHERE id = ?";
-        
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            
-            stmt.setInt(1, id);
-            return stmt.executeUpdate() > 0;
-            
+        Connection conn = null;
+        try {
+            conn = DatabaseConnection.getConnection();
+            conn.setAutoCommit(false);
+
+            // التحقق من وجود معاملات مرتبطة
+            if (hasRelatedTransactions(id, conn)) {
+                // تحديث حالة المادة إلى "غير نشط" بدلاً من حذفها
+                String updateSql = "UPDATE materials SET status = 'غير نشط', updated_at = CURRENT_TIMESTAMP WHERE id = ?";
+                try (PreparedStatement stmt = conn.prepareStatement(updateSql)) {
+                    stmt.setInt(1, id);
+                    boolean result = stmt.executeUpdate() > 0;
+                    conn.commit();
+                    return result;
+                }
+            } else {
+                // حذف المادة إذا لم تكن هناك معاملات مرتبطة
+                String deleteSql = "DELETE FROM materials WHERE id = ?";
+                try (PreparedStatement stmt = conn.prepareStatement(deleteSql)) {
+                    stmt.setInt(1, id);
+                    boolean result = stmt.executeUpdate() > 0;
+                    conn.commit();
+                    return result;
+                }
+            }
         } catch (SQLException e) {
             System.err.println("خطأ في حذف المادة: " + e.getMessage());
+            if (conn != null) {
+                try {
+                    conn.rollback();
+                } catch (SQLException ex) {
+                    System.err.println("خطأ في التراجع عن العملية: " + ex.getMessage());
+                }
+            }
             return false;
+        } finally {
+            if (conn != null) {
+                try {
+                    conn.setAutoCommit(true);
+                    conn.close();
+                } catch (SQLException e) {
+                    System.err.println("خطأ في إغلاق الاتصال: " + e.getMessage());
+                }
+            }
         }
     }
     
@@ -166,18 +212,39 @@ public Material findById(int id) throws SQLException {
     }
     
     // البحث عن المواد
-    public List<Material> search(String keyword) {
+    public List<Material> search(String keyword, String status, Integer categoryId) {
         List<Material> materials = new ArrayList<>();
-        String sql = "SELECT m.*, c.name as category_name FROM materials m " +
-                    "LEFT JOIN categories c ON m.category_id = c.id " +
-                    "WHERE m.name LIKE ? OR m.code LIKE ? " +
-                    "ORDER BY m.name";
+        StringBuilder sqlBuilder = new StringBuilder(
+            "SELECT m.*, c.name as category_name FROM materials m " +
+            "LEFT JOIN categories c ON m.category_id = c.id WHERE 1=1"
+        );
+        List<Object> params = new ArrayList<>();
+        
+        if (keyword != null && !keyword.trim().isEmpty()) {
+            sqlBuilder.append(" AND (m.name LIKE ? OR m.code LIKE ? OR m.unit LIKE ?)");
+            params.add("%" + keyword + "%");
+            params.add("%" + keyword + "%");
+            params.add("%" + keyword + "%");
+        }
+        
+        if (status != null && !status.trim().isEmpty()) {
+            sqlBuilder.append(" AND m.status = ?");
+            params.add(status);
+        }
+        
+        if (categoryId != null && categoryId > 0) {
+            sqlBuilder.append(" AND m.category_id = ?");
+            params.add(categoryId);
+        }
+        
+        sqlBuilder.append(" ORDER BY m.name");
         
         try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+             PreparedStatement stmt = conn.prepareStatement(sqlBuilder.toString())) {
             
-            stmt.setString(1, "%" + keyword + "%");
-            stmt.setString(2, "%" + keyword + "%");
+            for (int i = 0; i < params.size(); i++) {
+                stmt.setObject(i + 1, params.get(i));
+            }
             
             ResultSet rs = stmt.executeQuery();
             while (rs.next()) {

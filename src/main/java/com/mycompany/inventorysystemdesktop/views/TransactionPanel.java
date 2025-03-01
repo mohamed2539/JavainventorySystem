@@ -233,8 +233,8 @@ public class TransactionPanel extends JPanel {
         }
         
         try {
-            String referenceNo = (String) transactionTable.getValueAt(selectedRow, 0);
-            Transaction transaction = transactionDAO.findByReferenceNo(referenceNo);
+            int transactionId = (int) transactionTable.getValueAt(selectedRow, 0);
+            Transaction transaction = transactionDAO.findById(transactionId);
             
             if (transaction != null) {
                 TransactionDialog dialog = new TransactionDialog(
@@ -261,7 +261,7 @@ public class TransactionPanel extends JPanel {
         }
         
         try {
-            String referenceNo = (String) transactionTable.getValueAt(selectedRow, 0);
+            int transactionId = (int) transactionTable.getValueAt(selectedRow, 0);
             
             int confirm = JOptionPane.showConfirmDialog(
                 this,
@@ -271,7 +271,7 @@ public class TransactionPanel extends JPanel {
             );
             
             if (confirm == JOptionPane.YES_OPTION) {
-                if (transactionDAO.delete(referenceNo)) {
+                if (transactionDAO.delete(transactionId)) {
                     loadTransactions();
                     showMessage("تم حذف المعاملة بنجاح");
                 }

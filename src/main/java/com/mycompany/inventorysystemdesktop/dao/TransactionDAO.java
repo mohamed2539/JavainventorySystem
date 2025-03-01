@@ -1,6 +1,7 @@
 package com.mycompany.inventorysystemdesktop.dao;
 
 import com.mycompany.inventorysystemdesktop.models.Transaction;
+import com.mycompany.inventorysystemdesktop.models.TransactionDetail;
 import com.mycompany.inventorysystemdesktop.utils.DatabaseConnection;
 import java.sql.*;
 import java.util.ArrayList;
@@ -8,342 +9,188 @@ import java.util.Date;
 import java.util.List;
 
 public class TransactionDAO {
+    private final TransactionDetailDAO detailDAO;
+    private final MaterialDAO materialDAO;
     
-    public void create(Transaction transaction) throws SQLException {
-        String sql = "INSERT INTO transactions (material_id, type, quantity, unit_price, reference_no, notes, created_at, user_id) " +
-                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-                     
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+    public TransactionDAO() {
+        this.detailDAO = new TransactionDetailDAO();
+        this.materialDAO = new MaterialDAO();
+    }
+    
+    public boolean add(Transaction transaction) {
+        Connection conn = null;
+        try {
+            conn = DatabaseConnection.getConnection();
+            conn.setAutoCommit(false);
             
-            stmt.setInt(1, transaction.getMaterialId());
-            stmt.setString(2, transaction.getType());
-            stmt.setDouble(3, transaction.getQuantity());
-            stmt.setDouble(4, transaction.getUnitPrice());
-            stmt.setString(5, transaction.getReferenceNo());
-            stmt.setString(6, transaction.getNotes());
-            stmt.setTimestamp(7, new Timestamp(transaction.getTransactionDate().getTime()));
-            stmt.setInt(8, transaction.getUserId());
+            // إضافة المعاملة الرئيسية
+            String sql = "INSERT INTO transactions (type, notes, user_id, transaction_date) VALUES (?, ?, ?, ?)";
+            try (PreparedStatement stmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+                stmt.setString(1, transaction.getType());
+                stmt.setString(2, transaction.getNotes());
+                stmt.setInt(3, transaction.getUserId());
+                stmt.setTimestamp(4, new Timestamp(transaction.getTransactionDate().getTime()));
+                
+                if (stmt.executeUpdate() > 0) {
+                    ResultSet rs = stmt.getGeneratedKeys();
+                    if (rs.next()) {
+                        transaction.setId(rs.getInt(1));
+                        
+                        // إضافة تفاصيل المعاملة
+                        for (TransactionDetail detail : transaction.getDetails()) {
+                            detail.setTransactionId(transaction.getId());
+                            if (!detailDAO.add(detail, conn)) {
+                                throw new SQLException("فشل في إضافة تفاصيل المعاملة");
+                            }
+                            
+                            // تحديث كمية المادة
+                            double newQuantity;
+                            if (transaction.getType().equals("IN")) {
+                                newQuantity = materialDAO.getById(detail.getMaterialId()).getQuantity() + detail.getQuantity();
+                            } else {
+                                newQuantity = materialDAO.getById(detail.getMaterialId()).getQuantity() - detail.getQuantity();
+                            }
+                            materialDAO.updateQuantity(detail.getMaterialId(), newQuantity);
+                        }
+                        
+                        conn.commit();
+                        return true;
+                    }
+                }
+            }
             
-            stmt.executeUpdate();
+            conn.rollback();
+            return false;
             
-            // تحديث كمية المادة
-            updateMaterialQuantity(conn, transaction);
+        } catch (SQLException e) {
+            if (conn != null) {
+                try {
+                    conn.rollback();
+                } catch (SQLException ex) {
+                    System.err.println("خطأ في التراجع عن العملية: " + ex.getMessage());
+                }
+            }
+            System.err.println("خطأ في إضافة المعاملة: " + e.getMessage());
+            return false;
             
-            try (ResultSet generatedKeys = stmt.getGeneratedKeys()) {
-                if (generatedKeys.next()) {
-                    transaction.setId(generatedKeys.getInt(1));
+        } finally {
+            if (conn != null) {
+                try {
+                    conn.setAutoCommit(true);
+                    conn.close();
+                } catch (SQLException e) {
+                    System.err.println("خطأ في إغلاق الاتصال: " + e.getMessage());
                 }
             }
         }
     }
     
-    public void update(Transaction transaction) throws SQLException {
-        // استرجاع المعاملة القديمة
-        Transaction oldTransaction = findById(transaction.getId());
-        
-        String sql = "UPDATE transactions SET quantity = ?, unit_price = ?, reference_no = ?, notes = ?, created_at = ? " +
-                     "WHERE id = ?";
-                     
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            
-            stmt.setDouble(1, transaction.getQuantity());
-            stmt.setDouble(2, transaction.getUnitPrice());
-            stmt.setString(3, transaction.getReferenceNo());
-            stmt.setString(4, transaction.getNotes());
-            stmt.setTimestamp(5, new Timestamp(transaction.getTransactionDate().getTime()));
-            stmt.setInt(6, transaction.getId());
-            
-            stmt.executeUpdate();
-            
-            // تحديث كمية المادة
-            updateMaterialQuantityOnEdit(conn, oldTransaction, transaction);
-        }
-    }
-    
- public boolean delete(String referenceNo) throws SQLException {
-    Connection conn = null;
-    PreparedStatement stmt = null;
-    try {
-        conn = DatabaseConnection.getConnection();
-        conn.setAutoCommit(false);
-        
-        // أولاً نجد المعاملة
-        Transaction transaction = findByReferenceNo(referenceNo);
-        if (transaction == null) {
-            return false;
-        }
-        
-        // نقوم بتحديث كمية المادة
-        String updateMaterialSql = "UPDATE materials SET quantity = quantity " +
-            (transaction.getType().equals("IN") ? "-" : "+") +
-            " ? WHERE id = ?";
-        
-        stmt = conn.prepareStatement(updateMaterialSql);
-        stmt.setDouble(1, transaction.getQuantity());
-        stmt.setInt(2, transaction.getMaterialId());
-        stmt.executeUpdate();
-        
-        // ثم نحذف المعاملة
-        String deleteSql = "DELETE FROM transactions WHERE reference_no = ?";
-        stmt = conn.prepareStatement(deleteSql);
-        stmt.setString(1, referenceNo);
-        
-        int result = stmt.executeUpdate();
-        conn.commit();
-        return result > 0;
-        
-    } catch (SQLException e) {
-        if (conn != null) {
-            try {
-                conn.rollback();
-            } catch (SQLException ex) {
-                ex.printStackTrace();
-            }
-        }
-        throw e;
-    } finally {
-        if (stmt != null) {
-            stmt.close();
-        }
-        if (conn != null) {
-            conn.setAutoCommit(true);
-            conn.close();
-        }
-    }
-}
-    
- public Transaction findById(int id) throws SQLException {
-        String sql = "SELECT t.*, m.name as material_name, u.username as user_name " +
-                    "FROM transactions t " +
-                    "JOIN materials m ON t.material_id = m.id " +
-                    "LEFT JOIN users u ON t.user_id = u.id " +
-                    "WHERE t.id = ?";
-        
+    public Transaction findById(int id) throws SQLException {
+        String sql = "SELECT * FROM transactions WHERE id = ?";
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
             
             stmt.setInt(1, id);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return mapTransaction(rs);
-                }
+            ResultSet rs = stmt.executeQuery();
+            
+            if (rs.next()) {
+                Transaction transaction = mapResultSetToTransaction(rs);
+                transaction.setDetails(detailDAO.getByTransactionId(id));
+                return transaction;
             }
         }
         return null;
     }
     
-  public List<Transaction> search(String searchTerm, String type, Date fromDate, Date toDate) {
-    List<Transaction> transactions = new ArrayList<>();
-    StringBuilder sql = new StringBuilder(
-        "SELECT t.*, m.name as material_name " +
-        "FROM transactions t " +
-        "JOIN materials m ON t.material_id = m.id " +
-        "WHERE 1=1"
-    );
-    List<Object> params = new ArrayList<>();
-    
-    if (searchTerm != null && !searchTerm.isEmpty()) {
-        sql.append(" AND (m.name LIKE ? OR t.reference_no LIKE ? OR t.notes LIKE ?)");
-        params.add("%" + searchTerm + "%");
-        params.add("%" + searchTerm + "%");
-        params.add("%" + searchTerm + "%");
-    }
-    
-    if (type != null && !type.isEmpty()) {
-        sql.append(" AND t.type = ?");
-        params.add(type);
-    }
-    
-    if (fromDate != null) {
-        sql.append(" AND t.created_at >= ?");
-        params.add(new Timestamp(fromDate.getTime()));
-    }
-    
-    if (toDate != null) {
-        sql.append(" AND t.created_at <= ?");
-        params.add(new Timestamp(toDate.getTime()));
-    }
-    
-    sql.append(" ORDER BY t.created_at DESC");
-    
-    try (Connection conn = DatabaseConnection.getConnection();
-         PreparedStatement stmt = conn.prepareStatement(sql.toString())) {
+    public List<Transaction> search(String keyword, String type, Date from, Date to) throws SQLException {
+        List<Transaction> transactions = new ArrayList<>();
+        StringBuilder sql = new StringBuilder("SELECT t.* FROM transactions t ");
+        sql.append("WHERE 1=1 ");
+        List<Object> params = new ArrayList<>();
         
-        for (int i = 0; i < params.size(); i++) {
-            stmt.setObject(i + 1, params.get(i));
+        if (type != null && !type.isEmpty()) {
+            sql.append("AND t.type = ? ");
+            params.add(type);
         }
         
-        try (ResultSet rs = stmt.executeQuery()) {
+        if (from != null) {
+            sql.append("AND t.transaction_date >= ? ");
+            params.add(new Timestamp(from.getTime()));
+        }
+        
+        if (to != null) {
+            sql.append("AND t.transaction_date <= ? ");
+            params.add(new Timestamp(to.getTime()));
+        }
+        
+        if (keyword != null && !keyword.trim().isEmpty()) {
+            sql.append("AND (t.notes LIKE ? OR t.reference_no LIKE ?) ");
+            params.add("%" + keyword + "%");
+            params.add("%" + keyword + "%");
+        }
+        
+        sql.append("ORDER BY t.transaction_date DESC");
+        
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql.toString())) {
+            
+            for (int i = 0; i < params.size(); i++) {
+                stmt.setObject(i + 1, params.get(i));
+            }
+            
+            ResultSet rs = stmt.executeQuery();
             while (rs.next()) {
-                transactions.add(mapTransaction(rs));
+                Transaction transaction = mapResultSetToTransaction(rs);
+                transaction.setDetails(detailDAO.getByTransactionId(transaction.getId()));
+                transactions.add(transaction);
             }
         }
-    } catch (SQLException e) {
-        e.printStackTrace();
+        
+        return transactions;
     }
     
-    return transactions;
-}
-   private Transaction mapTransaction(ResultSet rs) throws SQLException {
+    private Transaction mapResultSetToTransaction(ResultSet rs) throws SQLException {
         Transaction transaction = new Transaction();
         transaction.setId(rs.getInt("id"));
-        transaction.setMaterialId(rs.getInt("material_id"));
         transaction.setType(rs.getString("type"));
-        transaction.setQuantity(rs.getDouble("quantity"));
-        transaction.setUnitPrice(rs.getDouble("unit_price"));
-        transaction.setReferenceNo(rs.getString("reference_no"));
         transaction.setNotes(rs.getString("notes"));
-        transaction.setTransactionDate(rs.getTimestamp("created_at"));
         transaction.setUserId(rs.getInt("user_id"));
+        transaction.setTransactionDate(rs.getTimestamp("transaction_date"));
+        transaction.setReferenceNo(rs.getString("reference_no"));
         return transaction;
     }
     
-    private void updateMaterialQuantity(Connection conn, Transaction transaction) throws SQLException {
-        String sql = "UPDATE materials SET quantity = quantity + ? WHERE id = ?";
-        double quantityChange = transaction.getType().equals("IN") ? transaction.getQuantity() : -transaction.getQuantity();
-        
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setDouble(1, quantityChange);
-            stmt.setInt(2, transaction.getMaterialId());
-            stmt.executeUpdate();
-        }
-    }
-    
-    private void updateMaterialQuantityOnEdit(Connection conn, Transaction oldTransaction, Transaction newTransaction) throws SQLException {
-        // عكس تأثير المعاملة القديمة
-        double oldQuantityChange = oldTransaction.getType().equals("IN") ? -oldTransaction.getQuantity() : oldTransaction.getQuantity();
-        
-        // إضافة تأثير المعاملة الجديدة
-        double newQuantityChange = newTransaction.getType().equals("IN") ? newTransaction.getQuantity() : -newTransaction.getQuantity();
-        
-        String sql = "UPDATE materials SET quantity = quantity + ? WHERE id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setDouble(1, oldQuantityChange + newQuantityChange);
-            stmt.setInt(2, newTransaction.getMaterialId());
-            stmt.executeUpdate();
-        }
-    }
- 
-    
-    
-        private void reverseTransactionEffect(Connection conn, Transaction transaction) throws SQLException {
-        String sql = "UPDATE materials SET quantity = quantity + ? WHERE id = ?";
-        double quantityChange = transaction.getType().equals("IN") ? -transaction.getQuantity() : transaction.getQuantity();
-        
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setDouble(1, quantityChange);
-            stmt.setInt(2, transaction.getMaterialId());
-            stmt.executeUpdate();
-        }
-    }
-    
-    // دوال إضافية للتقارير
-    public double getTotalIncoming(Date fromDate, Date toDate) throws SQLException {
-        String sql = "SELECT SUM(quantity * unit_price) as total FROM transactions " +
-                    "WHERE type = 'IN' AND created_at BETWEEN ? AND ?";
-        
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+    public boolean delete(int id) throws SQLException {
+        Connection conn = null;
+        try {
+            conn = DatabaseConnection.getConnection();
+            conn.setAutoCommit(false);
             
-            stmt.setTimestamp(1, new Timestamp(fromDate.getTime()));
-            stmt.setTimestamp(2, new Timestamp(toDate.getTime()));
+            // حذف تفاصيل المعاملة أولاً
+            if (detailDAO.deleteByTransactionId(id, conn)) {
+                // ثم حذف المعاملة نفسها
+                String sql = "DELETE FROM transactions WHERE id = ?";
+                try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                    stmt.setInt(1, id);
+                    if (stmt.executeUpdate() > 0) {
+                        conn.commit();
+                        return true;
+                    }
+                }
+            }
             
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getDouble("total");
+            conn.rollback();
+            return false;
+            
+        } finally {
+            if (conn != null) {
+                try {
+                    conn.setAutoCommit(true);
+                    conn.close();
+                } catch (SQLException e) {
+                    System.err.println("خطأ في إغلاق الاتصال: " + e.getMessage());
                 }
             }
         }
-        return 0.0;
     }
-    
-    public double getTotalOutgoing(Date fromDate, Date toDate) throws SQLException {
-        String sql = "SELECT SUM(quantity * unit_price) as total FROM transactions " +
-                    "WHERE type = 'OUT' AND created_at BETWEEN ? AND ?";
-        
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            
-            stmt.setTimestamp(1, new Timestamp(fromDate.getTime()));
-            stmt.setTimestamp(2, new Timestamp(toDate.getTime()));
-            
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getDouble("total");
-                }
-            }
-        }
-        return 0.0;
-    }
-    
-    public List<Transaction> getRecentTransactions(int limit) throws SQLException {
-        List<Transaction> transactions = new ArrayList<>();
-        String sql = "SELECT * FROM transactions ORDER BY created_at DESC LIMIT ?";
-        
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            
-            stmt.setInt(1, limit);
-            
-            try (ResultSet rs = stmt.executeQuery()) {
-                while (rs.next()) {
-                    transactions.add(mapTransaction(rs));
-                }
-            }
-        }
-        
-        return transactions;
-    }
-    
-    
-    
-     public List<Transaction> getAll(String type) {
-        List<Transaction> transactions = new ArrayList<>();
-        String sql = "SELECT t.*, m.name as material_name, u.username as user_name " +
-                    "FROM transactions t " +
-                    "JOIN materials m ON t.material_id = m.id " +
-                    "LEFT JOIN users u ON t.user_id = u.id " +
-                    "WHERE t.type = ?";
-        
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            
-            stmt.setString(1, type);
-            
-            try (ResultSet rs = stmt.executeQuery()) {
-                while (rs.next()) {
-                    Transaction transaction = mapTransaction(rs);
-                    transactions.add(transaction);
-                }
-            }
-        } catch (SQLException e) {
-            System.err.println("خطأ في جلب المعاملات: " + e.getMessage());
-        }
-        
-        return transactions;
-    }
-    
-     
-       public Transaction findByReferenceNo(String referenceNo) throws SQLException {
-        String sql = "SELECT t.*, m.name as material_name FROM transactions t " +
-                    "JOIN materials m ON t.material_id = m.id " +
-                    "WHERE t.reference_no = ?";
-                    
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            
-            stmt.setString(1, referenceNo);
-            try (ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    return mapTransaction(rs);
-                }
-            }
-        }
-        return null;
-    }
-     
-    
-     
 }

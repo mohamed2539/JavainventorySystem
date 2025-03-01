@@ -1,6 +1,8 @@
 package com.mycompany.inventorysystemdesktop.models;
 
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 
 public class Transaction {
     private int id;
@@ -12,15 +14,33 @@ public class Transaction {
     private String notes;
     private Date transactionDate;
     private int userId;
+    private List<TransactionDetail> details;
     
     // Constructor
     public Transaction() {
         this.transactionDate = new Date();
+        this.details = new ArrayList<>();
     }
     
     // Helper methods
     public double getTotalPrice() {
         return quantity * unitPrice;
+    }
+    
+    // Getters and Setters for details
+    public List<TransactionDetail> getDetails() {
+        return details;
+    }
+    
+    public void setDetails(List<TransactionDetail> details) {
+        this.details = details;
+    }
+    
+    public void addDetail(TransactionDetail detail) {
+        if (this.details == null) {
+            this.details = new ArrayList<>();
+        }
+        this.details.add(detail);
     }
     
     // Getters
